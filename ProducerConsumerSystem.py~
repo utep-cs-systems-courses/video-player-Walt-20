@@ -1,0 +1,80 @@
+import cv2
+import numpy as np
+import threading
+import queue
+import time
+import ConvertToGrayscale, DisplayFrames, ExtractAndDisplay, ExtractFrames
+
+# buffer to hold the frames
+buffer = queue.Queue()
+
+# semaphores
+mutex = threading.Semaphore(1) # binary semaphore to protect buffer access
+empty = threading.Semaphore(10) # semaphore to indicate empty buffer
+full = threading.Semaphore(0) # semaphore to indicate full buffer
+
+# extract the frames from the video file
+def extract_frames(filename):
+    capture = cv2.VideoCapture(filename)
+    while True:
+        ret, frame = capture.read()
+        if not ret:
+            # we are done extracting frames
+            buffer.put(None)
+            full.release()
+            break
+        empty.acquire()
+        mutex.acquire()
+        buffer.put(frame)
+        mutex.release()
+        full.release()
+
+# convert to grayscale
+def convert_to_grayscale():
+    while True:
+        full.acquire()
+        mutex.acquire()
+        frame = buffer.get()
+        mutex.release()
+        empty.release()
+        if frame is None:
+            # we're done converting frames
+            buffer.put(None)
+            break
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        empty.acquire()
+        mutex.acquire()
+        buffer.put(gray_frame)
+        mutex.release()
+        full.release()
+
+# display frames at original rate (42ms)
+def display_frames():
+    while True:
+        full.acquire()
+        mutex.acquire()
+        frame = buffer.get()
+        mutex.release()
+        empty.release()
+        if frame is None:
+            # we're done displaying frames
+            buffer.put(None)
+            break
+        cv2.imshow('Frame', frame)
+        cv2.waitKey(42)
+
+# Create and start threads
+extraction_thread = threading.Thread(target=extract_frames, args=('./clip.mp4',))
+conversion_thread = threading.Thread(target=convert_to_grayscale)
+display_thread = threading.Thread(target=display_frames)
+extraction_thread.start()
+conversion_thread.start()
+display_thread.start()
+
+# Wait for threads to finish
+extraction_thread.join()
+conversion_thread.join()
+display_thread.join()
+
+# Clean up
+cv2.destroyAllWindows()
